@@ -1,66 +1,53 @@
 ---
 title: Jev
-created: 2026-09-21
-updated: 2026-09-21
+created: 2026-09-22
+updated: 2026-09-22
 type: entity
 tags: [decision-model]
-sources: [raw/articles/typesafe-jev-intro.md]
+sources: [raw/articles/typesafe-jev.md]
 ---
 
 # Jev
 
-TypeSafe AI 的第一款 **System One Model**，2026-09-15 发布（early access）。作者 Diogo Almeida 曾任 OpenAI 研究员，参与 ChatGPT 背后的指令遵循研究。
+**Jev** 是 TypeSafe AI 于 2026-09-15 发布的**首个 System One 模型**，创始人 Diogo Almeida（前 OpenAI，参与过 ChatGPT 背后的指令遵循研究）。它不是对话模型——**不生成文本**，只输出带校准概率的类型化决策。
 
-它是 [[system-one-models]] 这个新模型类别的首个公开产品。核心承诺：**不生成文本，只输出带校准概率的结构化决策**——"unstructured state in, typed probabilistic decisions out"。
+一句话定位：**frontier-intelligence function call — unstructured state in, typed probabilistic decisions out.** ^[raw/articles/typesafe-jev.md]
 
-## 能力边界
+## 关键特征
 
-**擅长**：分类、路由、打分、抽取、分支。
-
-**明确不做**：
-- 不写代码、不写摘要、不聊天
-- **不返回推理过程**（"no reasoning back"）—— 你拿不到"为什么这么答"
-
-原文表述："it will not write code, summaries, or tell you why it answered the way it did."
+- **不幻觉**：输出结构预先定义，不会产生类型错误，因此结构上不可能幻觉
+- **快**：端到端 70ms–500ms
+- **便宜**：输入 $0.042/MTok，**输出免费**
+- **校准**：每个答案附带校准概率；置信度高则准确率高
+- **并行**：所有问题在单次查询中并行评估，加问题几乎不增加延迟
 
 ## 三种问题类型
 
-| 类型 | 行为 | 返回 |
-|---|---|---|
-| `choice` | 从预定义选项选一个（≤255） | 每项概率 + confidence |
-| `score` | 按有序档位打分（≤10 级） | 加权分数 + 完整分布 + confidence |
-| `noul` | 回答是/否 | 为真的概率（**无 confidence 字段**） |
+按 [[concepts/system-one-models]] 的规范，Jev 只覆盖三种判断原语：
 
-⚠️ **`noul` 没有独立 confidence 字段**。若写通用代码统一读 `answer.confidence`，会在二元题上崩掉。这是官方文档明确的坑。
+- **Choice** — 从预定义选项中选一个（≤255），返回各项概率 + confidence
+- **Score** — 按有序档位打分（≤10 级），返回加权分 + 分布 + confidence
+- **Noul** — 是非判断，返回为真概率。**注意没有独立 confidence 字段**
 
 ## 调用方式
 
-- **HTTP API** —— `POST`，body 含 `model` / `state` / `questions`
-- **Python SDK** —— `pip install typesafe-sdk`（Python 3.10+），读 `TYPESAFE_API_KEY`，默认模型 `jev-latest`
-- **框架集成** —— Pydantic AI（`pydantic_ai.models.typesafe.TypeSafeModel`）、LangChain（`langchain_typesafe.TypeSafeClassifier`）、OpenRouter
+- **HTTP API**：`POST`，body 为 `{model, state, questions}`，返回 `{model, answers, usage}` ^[raw/articles/typesafe-jev.md]
+- **Python SDK**：`pip install typesafe-sdk`，`from typesafe_sdk import Choice, Noul, Score, TypeSafeClient`
+- **框架集成**：Pydantic AI（`TypeSafeModel`）、LangChain（`TypeSafeClassifier`）、OpenRouter
+- **MCP server**：社区实现，暴露 `jev_classify` / `jev_score` / `jev_check` / `jev_ask`
 
-## 并行语义（关键特性）
+## 在 Hermes 中怎么用
 
-**每个问题针对同一 state 并行、独立求值。** 加第 4 个或第 14 个问题几乎不改变响应时间，只多付该问题的 token，且**不会降低其他答案的质量**。所以可以投机性提问、丢弃不需要的答案。
+Jev 不能当 [[entities/hermes-agent]] 的主模型（不生成文本、无法做工具调用循环）。正确姿势是经 MCP 接入为工具，详见 [[queries/jev-in-hermes]]。
 
-## 官方强要求
+## 适用与不适用
 
-**每个问题必须原子化（atomic）。** 一个 prompt 里塞多个判断会掉准确率。这与"如何写好评估器"的通行建议一致。
+**适合**：agent/工具路由、文档与工单分类、升级决策、eval 打分、guardrail 校验——即决策重复、高频、选项已知的场景。
 
-## 典型用途
-
-- Agent / 工具路由
-- 文档与工单分类
-- 升级（escalation）决策
-- 评估打分（rubric 结论）
-- 对 agent run 做事后判定：是否需要人工复核 / 严重程度 / 失败模式
-
-## 接入 agent 运行时
-
-Jev 已有 MCP server 形态，可接入支持 MCP 的 agent 运行时（如 [[hermes-agent]]）。具体方案见 [[jev-in-hermes]]。
+**不适合**：写代码、写摘要、解释推理过程。它**不会告诉你为什么这样判断**。
 
 ## 相关
 
-- [[system-one-models]] —— 所属模型类别
-- [[jev-in-hermes]] —— 在 Hermes 中的集成
-- [[hermes-agent]] —— 宿主运行时
+- [[concepts/system-one-models]] — Jev 所属的模型类别
+- [[entities/hermes-agent]] — 主要集成目标运行时
+- [[queries/jev-in-hermes]] — 具体集成方案
