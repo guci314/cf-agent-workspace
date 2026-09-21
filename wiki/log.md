@@ -30,7 +30,19 @@
 结论归档为 [[jev-in-hermes]]。
 
 ## [2026-09-21] lint | 首次体检
-- 修复：`index.md`、`log.md` 缺失（schema 要求但未建）
-- 修复：`[[mcp-integration]]`、`[[jev-in-hermes]]` 为红链（被 cite 但页面不存在）
-- 待办：`raw/articles/` 下 `hermes-*` 有三个近似文件，疑似重复采集，待合并
-- 待办：补充模型选型对比页（MiniMax M3 / DeepSeek V4.1 Flash / GLM-5.3 基准数据已收集但未建页）
+发现：`index.md`、`log.md` 缺失；`[[mcp-integration]]`、`[[jev-in-hermes]]` 为红链；
+`raw/articles/` 下 hermes-* 疑似重复采集。
+
+## [2026-09-21] lint | 修复上轮发现
+- 补 `index.md`（内容目录，覆盖 entities / concepts / queries / sources）
+- 补 `log.md`（本文件）
+- 补 [[mcp-integration]]（原被 [[hermes-agent]] cite 但页面不存在）
+- 补 [[jev-in-hermes]]（原被多页 cite 但页面不存在）
+- 补 [[llm-wiki-pattern]]（原被 [[index]] cite 但页面不存在）
+- 结果：wiki 内部 wikilink 已无红链
+
+## [2026-09-21] lint | 待办
+- `raw/articles/` 下 `hermes-mcp-docs.md` / `hermes-agent-mcp.md` / `hermes-agent-mcp-docs.md`
+  三个近似文件疑似重复采集，待合并为单一源
+- 待建：模型选型对比页（comparison 类型）。MiniMax M3 / DeepSeek V4.1 Flash / GLM-5.3
+  的基准数据已收集在会话中，但尚未落盘为 raw 源，也未建 comparison 页
