@@ -1,7 +1,7 @@
 ---
 title: Jev
-created: 2026-09-22
-updated: 2026-09-22
+created: 2026-09-21
+updated: 2026-09-21
 type: entity
 tags: [decision-model]
 sources: [raw/articles/typesafe-jev.md]
@@ -23,7 +23,7 @@ sources: [raw/articles/typesafe-jev.md]
 
 ## 三种问题类型
 
-按 [[concepts/system-one-models]] 的规范，Jev 只覆盖三种判断原语：
+按 [[system-one-models]] 的规范，Jev 只覆盖三种判断原语：
 
 - **Choice** — 从预定义选项中选一个（≤255），返回各项概率 + confidence
 - **Score** — 按有序档位打分（≤10 级），返回加权分 + 分布 + confidence
@@ -38,7 +38,7 @@ sources: [raw/articles/typesafe-jev.md]
 
 ## 在 Hermes 中怎么用
 
-Jev 不能当 [[entities/hermes-agent]] 的主模型（不生成文本、无法做工具调用循环）。正确姿势是经 MCP 接入为工具，详见 [[queries/jev-in-hermes]]。
+Jev 不能当 [[hermes-agent]] 的主模型（不生成文本、无法做工具调用循环）。正确姿势是经 MCP 接入为工具，详见 [[jev-in-hermes]]。
 
 ## 适用与不适用
 
@@ -48,6 +48,6 @@ Jev 不能当 [[entities/hermes-agent]] 的主模型（不生成文本、无法�
 
 ## 相关
 
-- [[concepts/system-one-models]] — Jev 所属的模型类别
-- [[entities/hermes-agent]] — 主要集成目标运行时
-- [[queries/jev-in-hermes]] — 具体集成方案
+- [[system-one-models]] — Jev 所属的模型类别
+- [[hermes-agent]] — 主要集成目标运行时
+- [[jev-in-hermes]] — 具体集成方案
