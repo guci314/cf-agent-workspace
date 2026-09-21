@@ -1,105 +1,57 @@
-# TypeSafe Jev — System One Model 发布与 API 摘录
+---
+title: Introducing System One Models & Jev
+author: Diogo Almeida (founder, TypeSafe)
+source: https://typesafe.ai/blog/introducing-system-one-models-and-jev
+published: 2026-09-15
+retrieved: 2026-09-21
+type: raw-source
+note: 原始资料，immutable
+---
 
-> **Sources**:
-> - https://typesafe.ai/blog/introducing-system-one-models-and-jev (2026-09-15, Diogo Almeida)
-> - https://langfuse.com/blog/2026-09-18-using-typesafes-jev-for-evals (2026-09-18)
-> - https://pydantic.dev/docs/ai/models/typesafe/
-> **Captured**: 2026-09-21
-> **Layer**: raw (immutable)
+# Introducing System One Models & Jev
 
-## 定位
+Today, TypeSafe AI is releasing our first **System One Model**: a new class of frontier models built to make fast, structured decisions that software can use directly.
 
-TypeSafe AI 的第一款 **System One Model**，2026-09-15 发布（early access）。
-作者 Diogo Almeida 曾任 OpenAI 研究员（参与 ChatGPT 背后的指令遵循研究）。
+We built a new stack entirely focused on automation: a new model architecture, parallel sampler for maximum efficiency, and training method we call **Reinforcement Learning for Calibrated Decisions (RLCD)**.
 
-原文定义："Jev achieves similar levels of intelligence on System One tasks compared to existing LLMs, while being two orders of magnitude faster and more efficient. While Jev gives up string generation, it's optimized for structured outputs and can't hallucinate."
+Our first public model is **Jev**, available today in early access. Jev achieves similar levels of intelligence on System One tasks compared to existing LLMs, while being two orders of magnitude faster and more efficient. While Jev gives up string generation, it's optimized for structured outputs and **can't hallucinate**.
 
-一句话："a frontier-intelligence function call: unstructured state in, typed probabilistic decisions out."
+Think of Jev as a frontier-intelligence function call: **unstructured state in, typed probabilistic decisions out.**
 
-## 对照表（原文）
+## Frontiers, Old and New
 
-| | 传统 LLM | System One + Jev |
+| Dimension | Existing LLMs | System One + Jev |
 |---|---|---|
-| 训练优化 | RLHF / RLVR | **RLCD**（Reinforcement Learning for Calibrated Decisions）|
-| 输入侧重 | 顺序消息 | 结构化程序状态 |
-| 输出 | 字符串（需解析+校验） | **类型安全的结构化值**（预先定义） |
-| 采样 | 顺序，逐 token | **并行**，单次查询生成全部输出 |
-| 输入成本 | $0.20–$10 / MTok | **$0.042 / MTok** |
-| 输出成本 | 约为输入 5 倍 | **免费**（"too cheap to meter"）|
-| 端到端延迟 | 3–329 秒 | **70ms–500ms** |
-| 置信度 | 过度自信、不一致 | **每次输出都带校准置信度** |
-| 适用 | 人在回路任务 | 可验证问题、smart if-statements、大数据 map-reduce、实时应用 |
+| Optimized with | RLHF / RLVR | RLCD (RL for Calibrated Decisions) |
+| Optimizes for | Human preference | Calibrated decisions: epistemically honest probabilities |
+| Inputs | Unstructured text, sequential messages | Unstructured data, emphasis on **structured program state** |
+| Outputs | Strings / generated text. Needs parsing + validation. Can go off the rails | **Type-safe structured values.** Outputs defined in advance. Never makes type errors. All answers carry calibrated probabilities |
+| Sampling | Sequential, one token at a time | **Parallel.** All outputs in a single query |
+| Cost | Input $0.20–$10/MTok; output ~5x input | **Input $0.042/MTok; output FREE** |
+| Speed | End-to-end 3–329 seconds | **End-to-end 70ms–500ms.** 40x–200x faster for System One shaped queries |
+| Confidence | Tend to be overconfident and inconsistent | **Always communicates confidence.** Calibrated: higher confidence means higher accuracy |
+| Use cases | Human-in-the-loop (chatbots, copilots, coding agents) | **AI-Powered Workflows / smart if-statements.** Classify, route, score, extract, branch |
 
-原文强调："There is also always some risk that the AI goes off the rails"（对 LLM）；而 Jev "never makes type errors"，且无法幻觉（结构预定义）。
+## Evidence / Technical Results
 
-## 三种问题类型（Question primitives）
+Claims you can easily verify:
+- **Speed per call**: We truly are that fast (evals run from laptops on the West Coast).
+- **Cost per call**: We make our pricing transparent. We can't prove it isn't subsidized; we'll need the long-term to prove sustainability.
+- **No type errors**: This would be easy to falsify with a single counter-example, but it is mathematically impossible.
 
-- **Choice** — 从你定义的一组选项中选一个，**最多 255 个**，返回每项概率 + confidence
-- **Score** — 按有序评分档打分，**最多 10 级**，返回概率加权值 + 完整分布 + confidence
-- **Noul** — 回答是/否，返回为真的概率。**注意：没有独立的 confidence 字段**，代码若统一读 `.confidence` 会在二元题上出错
+## Positioning
 
-## HTTP API 请求示例
+Jev is positioned as **complementary to LLMs, not a replacement**:
 
-```json
-{
-  "model": "jev-latest",
-  "state": { "task": "...", "tool_calls": "...", "final_output": "..." },
-  "questions": {
-    "needs_review": {
-      "type": "noul",
-      "instructions": "Does this run need a human to look at it?"
-    },
-    "severity": {
-      "type": "score",
-      "instructions": "How badly did this run go?",
-      "criteria": ["Completed cleanly", "Wasteful path", "Wrong result", "Unsafe action"]
-    },
-    "failure_mode": {
-      "type": "choice",
-      "instructions": "What went wrong, if anything?",
-      "criteria": {
-        "tool_error": "A tool returned an error",
-        "missing_context": "The agent lacked needed information",
-        "wrong_approach": "Unsuitable strategy",
-        "none": "Nothing went wrong"
-      }
-    }
-  }
-}
-```
+- **LLM** = open-ended reasoning and generation
+- **Jev** = fast, structured decisions along the way
 
-## HTTP API 响应示例
+Use it where decisions are **repeated, high volume, and the possible answers are known before the call**:
 
-```json
-{
-  "model": "jev-1.13.0",
-  "answers": {
-    "needs_review": { "type": "noul", "noul": 0.88 },
-    "severity": {
-      "type": "score", "score": 1.89, "confidence": 0.44,
-      "probabilities": { "0": 0.02, "1": 0.21, "2": 0.63, "3": 0.14 }
-    },
-    "failure_mode": {
-      "type": "choice", "choice": "missing_context", "confidence": 0.51,
-      "probabilities": { "tool_error": 0.11, "missing_context": 0.58, "wrong_approach": 0.24, "none": 0.02 }
-    }
-  },
-  "usage": { "input_tokens": 1840, "output_tokens": 27 }
-}
-```
-
-## 并行语义（重要）
-
-"Every question is evaluated in parallel and in isolation against the same state." 加第 4 或第 14 个问题几乎不改变响应时间，只付该问题的 token，且不会降低其他答案质量。可以投机性提问、丢弃不需要的。
-
-## TypeSafe 文档的强要求
-
-- **每个问题必须原子化（atomic）**——一个 prompt 塞多个判断会掉准确率
-- 三种调用面：HTTP API / 官方 Python+JS SDK / 框架集成
-- Python SDK: `pip install typesafe-sdk`（Python 3.10+），读环境变量 `TYPESAFE_API_KEY`，默认模型 `jev-latest`
-- 框架集成：Pydantic AI（`pydantic_ai.models.typesafe.TypeSafeModel`，输出类型的每个字段变成一个 question）、LangChain（`langchain_typesafe.TypeSafeClassifier`）、OpenRouter
-
-## Jev 明确做不了的事
-
-- 不写代码、不写摘要、不解释为什么这么答（"no reasoning back"）
-- 弱于任何需要生成字符串的任务
+- Agent and tool routing
+- Document and ticket classification
+- Escalation decisions
+- Eval scoring (rubric verdicts)
+- Guardrails, jailbreak detection, verifying LLM outputs
+- Map-reducing over big data
+- Real-time applications (100ms means AI usable where UX is critical)
