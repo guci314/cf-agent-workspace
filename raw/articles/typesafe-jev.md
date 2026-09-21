@@ -1,37 +1,63 @@
-# TypeSafe Jev — System One Model 原始资料
+# TypeSafe System One Models & Jev — 原始资料
 
-> 来源：
-> - https://typesafe.ai/blog/introducing-system-one-models-and-jev （官方发布博客，2026-09-15）
-> - https://langfuse.com/blog/2026-09-18-using-typesafes-jev-for-evals （Langfuse 实测文，2026-09-18）
-> 抓取：2026-09-21 ｜ raw 层存档
+> 来源 1：https://typesafe.ai/blog/introducing-system-one-models-and-jev
+>         （Diogo Almeida, founder, 2026-09-15）
+> 来源 2：https://langfuse.com/blog/2026-09-18-using-typesafes-jev-for-evals
+>         （Annabell Schäfer, 2026-09-18）
+> 存档日期：2026-09-21
 
-## 官方定义
+## 一、发布背景（typesafe.ai 官方博客）
 
-> "Think of Jev as a frontier-intelligence function call: unstructured state in, typed probabilistic decisions out."
+作者 Diogo Almeida 曾在 OpenAI 参与构建让语言模型擅长遵循指令与人对话的方法，
+"but despite the hype it became obvious to me that there was something really big
+missing."
 
-Jev 是 TypeSafe AI 发布的第一个 **System One Model**。核心取舍：**放弃字符串生成能力，换取结构化输出与速度**。
+> "Models have been superhuman at chat for years, so where is all the automation?"
 
-## 官方对比表（现有 LLM vs System One + Jev）
+经过两年 stealth 研发，发布首个 **System One Model**：一类为"做出软件可直接使用的
+快速结构化决策"而构建的全新前沿模型。
+
+技术栈三件套：
+- 新的模型架构
+- 并行采样器（parallel sampler）
+- 训练方法 **RLCD**（Reinforcement Learning for Calibrated Decisions）
+
+## 二、官方对比表：现有 LLM vs System One + Jev
 
 | 维度 | 现有 LLM | System One + Jev |
-|------|----------|------------------|
-| 优化方法 | RLHF / RLVR | RLCD（Reinforcement Learning for Calibrated Decisions） |
-| 优化目标 | 人类偏好：人们喜欢的文字与对话 | 校准决策：在 System One 任务上给出认识论诚实的概率 |
-| 输入 | 非结构化数据，偏重**顺序消息** | 非结构化数据，偏重**结构化程序状态** |
-| 输出 | 字符串/生成文本。要被软件使用需解析+校验，且总有跑偏风险 | 类型安全的结构化值。可能输出与结构**预先定义**，模型永不产生类型错误，每个答案附带校准概率与置信度 |
-| 采样 | 顺序。逐 token 生成 | 并行。单次查询生成全部输出 |
-| 成本 | 输入 $0.20–$10 / MTok；输出约为输入 5 倍 | 输入 $0.042 / MTok；**输出免费** |
-| 速度 | 端到端 3–329 秒 | 端到端 **70ms–500ms**（同级别前沿智能下快 40–200 倍） |
-| 置信度 | 即便被要求也给不准，倾向过度自信且不一致 | 每个输出都带置信度与不确定性，且**校准过**：更高置信=更高准确率 |
-| 适用场景 | 人在环任务（chatbot、copilot、coding agent） | AI 工作流 / 智能 if 语句、大数据 map-reduce、实时应用、验证与护栏 |
+|---|---|---|
+| 优化方法 | RLHF / RLVR | **RLCD**（校准决策强化学习） |
+| 优化目标 | 人类偏好：评分者喜欢的写作与对话 | 可验证奖励；**校准决策**：在 System One 任务上给出认识论诚实的概率 |
+| 输入 | 非结构化数据（文本），强调顺序消息 | 非结构化数据，强调**结构化程序状态** |
+| 输出 | 字符串/生成文本；需解析+校验；有跑偏风险 | **类型安全的结构化值**；输出可能性预先定义；永不产生类型错误；所有答案附带校准概率与置信度 |
+| 采样 | 顺序，逐 token 生成 | **并行**，单次查询生成全部输出 |
+| 成本 | 输入 $0.20–$10/MTok；输出约为输入 5 倍 | **输入 $0.042/MTok（$42/十亿 token）；输出免费** |
+| 速度 | 前沿模型端到端 3–329 秒 | **70ms–500ms**；同等前沿智能水平下快 40×–200× |
+| 置信度 | 过度自信且不一致 | 每次输出都传达置信度与不确定性；**校准**：置信度越高准确率越高 |
+| 适用场景 | 人在回路任务（chatbot、copilot、coding agent） | AI 工作流/智能 if 语句；大数据 map-reduce；实时应用；验证一切 |
 
-## 三种问题类型（Primitives）
+## 三、Jev 能回答什么（langfuse 文章）
 
-- **Choice** — 从你定义的一组选项中选一个，最多 **255** 个，返回每项概率 + confidence
-- **Score** — 按有序评分档打分，最多 **10** 级，返回概率加权分数、完整分布、confidence
-- **Noul** — 回答是/否，返回为真的概率。**没有独立的 confidence 字段**（对每个 answer 都读 `.confidence` 的代码会在二元题上崩）
+> "You send a state, a string or JSON, plus typed questions. You get typed
+> answers with probabilities. It gives you no reasoning back. Useless at other
+> tasks."
 
-## HTTP API 请求示例（Langfuse 实测）
+三种问题类型：
+
+- **Choice** — 从你定义的一组选项中选一个，**最多 255 个**，返回每项概率 + 一个 confidence 值
+- **Score** — 针对有序评分档评级，返回概率加权值、完整分布、confidence。**最多 10 级**
+- **Noul** — 回答是/否，返回为真的概率。**没有独立的 confidence 字段**，因此对所有
+  answer 都读 `.confidence` 的代码会在二元题上崩掉
+
+适合的场景（决策重复、高频、**可能答案在调用前已知**）：
+- Agent 与工具路由
+- 文档与工单分类
+- 升级（escalation）决策
+- Eval 评分（只需要 rubric 判定时）
+
+## 四、请求/响应示例（langfuse，agent run 三合一评判）
+
+请求：
 
 ```json
 {
@@ -71,7 +97,7 @@ Jev 是 TypeSafe AI 发布的第一个 **System One Model**。核心取舍：**�
 }
 ```
 
-## HTTP API 响应示例
+响应：
 
 ```json
 {
@@ -107,38 +133,26 @@ Jev 是 TypeSafe AI 发布的第一个 **System One Model**。核心取舍：**�
 }
 ```
 
-**解读要点**：`needs_review` 0.88 → 排队人工；`severity` 1.89 → 逼近"交付错误结果"；`failure_mode` 结论不明确（missing_context 0.58 居首，但 wrong_approach 0.24 紧随，confidence 仅 0.51）。
+解读要点（原文）：`needs_review` 0.88 → 排队；`severity` 1.89，略低于"交付了错误结果"；
+`failure_mode` 不确定 —— `missing_context` 以 0.58 领先，但 confidence 只有 0.51，
+因为 `wrong_approach` 以 0.24 紧追，二者仅凭 trace 确实难以区分。
 
-## 并行评估特性
+**关键机制：每个问题都是对同一 state 并行且隔离评估的。** 加第 4 个问题或第 14 个，
+响应时间几乎不变，只付该问题本身的 token，且不会降低其他问题的答案质量。
 
-> "Every question is evaluated in parallel and in isolation against the same state."
+## 五、SDK 与集成
 
-加第 4 个或第 14 个问题，响应时间几乎不变，只多付该问题本身的 token，且不会降低其他问题的答案质量。可以"投机性提问"再丢弃不需要的。
+- **官方 SDK**：Python + JavaScript，另有原始 HTTP API
+- **Python**：`pip install typesafe-sdk`（需 Python 3.10+），
+  从环境变量 `TYPESAFE_API_KEY` 读取凭证，默认模型 `jev-latest`
+- **Pydantic AI**：`pydantic_ai.models.typesafe` 的 `TypeSafeModel` —— 输出类型的
+  每个字段变成一个问题
+- **LangChain**：`langchain_typesafe` 的 `TypeSafeClassifier`，
+  `classifier.invoke({...})` 直接返回分类结果
+- **OpenRouter**：提供 TypeSafe SDK 接入文档
 
-## 官方强调：每个问题必须原子化（atomic）
+## 六、文档强调的原则
 
-TypeSafe 文档反复强调这一点，与"如何写好评估器"的指导一致。
+> "The TypeSafe docs are insistent that each question must be atomic."
 
-## 定价与速度证据（官方自述）
-
-- 输入 $0.042 / MTok（$42 per billion tokens）
-- 输出免费（"too cheap to meter"）
-- 端到端 70ms–500ms
-- 官方承认"无法证明定价未被补贴"，需长期验证可持续性
-
-## SDK 与集成
-
-- Python：`pip install typesafe-sdk`（需 Python 3.10+），读 `TYPESAFE_API_KEY`，默认模型 `jev-latest`
-- 核心类：`TypeSafeClient`、`AsyncTypeSafeClient`、`Choice`、`Score`、`Noul`
-- JS/TS：官方 SDK
-- Pydantic AI：`typesafe_sdk` + `pydantic_ai.models.typesafe.TypeSafeModel`（输出类型的每个字段变成一个 question）
-- LangChain：`langchain_typesafe` 的 `TypeSafeClassifier`
-- OpenRouter：提供 TypeSafe SDK 接入
-- 原始 HTTP API 亦可直接调用
-
-## 官方适用场景清单
-
-- Agent 与工具路由
-- 文档与工单分类
-- 升级/上报决策
-- Eval 评分（只需 rubric 判定时）
+每个问题必须原子化 —— 这与"如何写好 evaluator"的指导高度一致。
