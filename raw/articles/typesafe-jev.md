@@ -1,61 +1,51 @@
-# TypeSafe System One Models & Jev — 原始资料
+# Source: TypeSafe Jev — 原始资料存档
 
-> 来源 1：https://typesafe.ai/blog/introducing-system-one-models-and-jev
->         （Diogo Almeida, founder, 2026-09-15）
-> 来源 2：https://langfuse.com/blog/2026-09-18-using-typesafes-jev-for-evals
->         （Annabell Schäfer, 2026-09-18）
-> 存档日期：2026-09-21
+> **存档说明**：本文件是 Jev 相关原始资料的摘录汇总，供 wiki 页面溯源使用。
+> **采集日期**：2026-09-22
+> **来源清单**：
+> 1. TypeSafe AI 官方博客《Introducing System One Models & Jev》(2026-09-15)，作者 Diogo Almeida（创始人，前 OpenAI）
+> 2. Langfuse 博客《Using TypeSafe's Jev for evals》(2026-09-18)，作者 Annabell Schäfer
+> 3. Pydantic AI 文档《TypeSafe (Jev)》
+> 4. LangChain 博客《Building a Harness with Jev》(2026-09-17)
+> 5. MCP Market 条目「Jev」(作者 rashedInt32)
 
-## 一、发布背景（typesafe.ai 官方博客）
+---
 
-作者 Diogo Almeida 曾在 OpenAI 参与构建让语言模型擅长遵循指令与人对话的方法，
-"but despite the hype it became obvious to me that there was something really big
-missing."
+## 1. 定位与设计动机（来源 1）
 
 > "Models have been superhuman at chat for years, so where is all the automation?"
 
-经过两年 stealth 研发，发布首个 **System One Model**：一类为"做出软件可直接使用的
-快速结构化决策"而构建的全新前沿模型。
+> "today, TypeSafe AI is releasing our first System One Model: a new class of frontier models built to make fast, structured decisions that software can use directly."
 
-技术栈三件套：
-- 新的模型架构
-- 并行采样器（parallel sampler）
-- 训练方法 **RLCD**（Reinforcement Learning for Calibrated Decisions）
+> "Our first public model is **Jev**, available today in early access. Jev achieves similar levels of intelligence on System One tasks compared to existing LLMs, while being two orders of magnitude faster and more efficient. While Jev gives up string generation, it's optimized for structured outputs and **can't hallucinate**."
 
-## 二、官方对比表：现有 LLM vs System One + Jev
+> "Think of Jev as a frontier-intelligence function call: **unstructured state in, typed probabilistic decisions out**."
+
+## 2. 与现有 LLM 的对照（来源 1）
 
 | 维度 | 现有 LLM | System One + Jev |
-|---|---|---|
-| 优化方法 | RLHF / RLVR | **RLCD**（校准决策强化学习） |
-| 优化目标 | 人类偏好：评分者喜欢的写作与对话 | 可验证奖励；**校准决策**：在 System One 任务上给出认识论诚实的概率 |
-| 输入 | 非结构化数据（文本），强调顺序消息 | 非结构化数据，强调**结构化程序状态** |
-| 输出 | 字符串/生成文本；需解析+校验；有跑偏风险 | **类型安全的结构化值**；输出可能性预先定义；永不产生类型错误；所有答案附带校准概率与置信度 |
-| 采样 | 顺序，逐 token 生成 | **并行**，单次查询生成全部输出 |
-| 成本 | 输入 $0.20–$10/MTok；输出约为输入 5 倍 | **输入 $0.042/MTok（$42/十亿 token）；输出免费** |
-| 速度 | 前沿模型端到端 3–329 秒 | **70ms–500ms**；同等前沿智能水平下快 40×–200× |
-| 置信度 | 过度自信且不一致 | 每次输出都传达置信度与不确定性；**校准**：置信度越高准确率越高 |
-| 适用场景 | 人在回路任务（chatbot、copilot、coding agent） | AI 工作流/智能 if 语句；大数据 map-reduce；实时应用；验证一切 |
+|------|----------|------------------|
+| 优化方法 | RLHF / RLVR | RLCD（Reinforcement Learning for Calibrated Decisions） |
+| 优化目标 | 人类偏好（写作、聊天响应） | 校准决策（认识论上诚实的概率） |
+| 输入 | 非结构化数据，强调顺序消息 | 非结构化数据，强调结构化程序状态 |
+| 输出 | 字符串，需解析 + 验证，有跑偏风险 | 类型安全的结构化值，模型不会类型错误 |
+| 采样 | 顺序（逐 token） | 并行（单次查询生成所有输出） |
+| 成本 | 输入 $0.20–$10/MTok，输出约为输入 5 倍 | 输入 $0.042/MTok，输出免费 |
+| 速度 | 端到端 3–329 秒 | 70ms–500ms |
+| 置信度 | 过度自信、不一致 | 每个输出都带校准置信度 |
+| 典型用例 | 人在环中（聊天、copilot、coding agent） | AI 工作流 / 智能 if 语句、大数据 map-reduce、实时应用、验证 |
 
-## 三、Jev 能回答什么（langfuse 文章）
+> "End-to-end response time is 70ms-500ms for TypeSafe. This can range from 40x-200x faster for the same levels of frontier intelligence for System One shaped queries."
 
-> "You send a state, a string or JSON, plus typed questions. You get typed
-> answers with probabilities. It gives you no reasoning back. Useless at other
-> tasks."
+> "All answers are accompanied with calibrated probabilities and confidence scores."
 
-三种问题类型：
+## 3. 三种问题类型（来源 2、4）
 
-- **Choice** — 从你定义的一组选项中选一个，**最多 255 个**，返回每项概率 + 一个 confidence 值
-- **Score** — 针对有序评分档评级，返回概率加权值、完整分布、confidence。**最多 10 级**
-- **Noul** — 回答是/否，返回为真的概率。**没有独立的 confidence 字段**，因此对所有
-  answer 都读 `.confidence` 的代码会在二元题上崩掉
+- **Choice** — 从你定义的一组选项中选一个，**上限 255 个**，返回每项概率 + 一个 confidence 值
+- **Score** — 按有序评分档打分，**上限 10 级**，返回概率加权值 + 完整分布 + confidence 值
+- **Noul** — 回答是/否，返回为真的概率。**没有独立的 confidence 字段**，所以对所有答案统一读 `.confidence` 的代码会在二元题上崩溃
 
-适合的场景（决策重复、高频、**可能答案在调用前已知**）：
-- Agent 与工具路由
-- 文档与工单分类
-- 升级（escalation）决策
-- Eval 评分（只需要 rubric 判定时）
-
-## 四、请求/响应示例（langfuse，agent run 三合一评判）
+## 4. HTTP API 示例（来源 2）
 
 请求：
 
@@ -133,26 +123,45 @@ missing."
 }
 ```
 
-解读要点（原文）：`needs_review` 0.88 → 排队；`severity` 1.89，略低于"交付了错误结果"；
-`failure_mode` 不确定 —— `missing_context` 以 0.58 领先，但 confidence 只有 0.51，
-因为 `wrong_approach` 以 0.24 紧追，二者仅凭 trace 确实难以区分。
+> "Every question is evaluated in parallel and in isolation against the same state. So adding a fourth question, or a fourteenth, barely changes response time, costs only the tokens of the question itself, and cannot degrade the answers to the others."
 
-**关键机制：每个问题都是对同一 state 并行且隔离评估的。** 加第 4 个问题或第 14 个，
-响应时间几乎不变，只付该问题本身的 token，且不会降低其他问题的答案质量。
+## 5. 使用建议（来源 2）
 
-## 五、SDK 与集成
+- Jev 适用于决策**重复、高频、且可能答案在调用前已known**的场景：
+  - Agent 与工具路由
+  - 文档与工单分类
+  - 升级/上报决策
+  - Eval 打分（只需要 rubric 判定时）
+- TypeSafe 文档**坚持每个问题必须原子化（atomic）**
 
-- **官方 SDK**：Python + JavaScript，另有原始 HTTP API
-- **Python**：`pip install typesafe-sdk`（需 Python 3.10+），
-  从环境变量 `TYPESAFE_API_KEY` 读取凭证，默认模型 `jev-latest`
-- **Pydantic AI**：`pydantic_ai.models.typesafe` 的 `TypeSafeModel` —— 输出类型的
-  每个字段变成一个问题
-- **LangChain**：`langchain_typesafe` 的 `TypeSafeClassifier`，
-  `classifier.invoke({...})` 直接返回分类结果
-- **OpenRouter**：提供 TypeSafe SDK 接入文档
+## 6. Python SDK（来源 3）
 
-## 六、文档强调的原则
+```bash
+pip install typesafe-sdk   # 需要 Python 3.10+
+export TYPESAFE_API_KEY=...
+```
 
-> "The TypeSafe docs are insistent that each question must be atomic."
+```python
+from typesafe_sdk import Choice, Noul, NoulCriteria, Score, TypeSafeClient
 
-每个问题必须原子化 —— 这与"如何写好 evaluator"的指导高度一致。
+client = TypeSafeClient()  # 自动读 TYPESAFE_API_KEY，默认模型 jev-latest
+```
+
+SDK 也提供 `AsyncTypeSafeClient`。从 `apiKey` / `api_key` 参数或 `TYPESAFE_API_KEY` 环境变量读取凭证。
+
+## 7. 框架集成（来源 3、4）
+
+- **Pydantic AI**：`pydantic_ai.models.typesafe` 的 `TypeSafeModel`；"Each field of the `output_type` becomes one question"
+- **LangChain**：`langchain_typesafe` 的 `TypeSafeClassifier`，`classifier.invoke({...})` 返回分类结果而非聊天响应
+- **OpenRouter**：官方文档有 TypeSafe SDK 集成指南
+
+## 8. MCP server（来源 5）
+
+社区 MCP server 将 Jev 暴露为类型化判断工具：
+
+- `jev_classify` — 分类
+- `jev_score` — 打分
+- `jev_check` — 校验
+- `jev_ask` — 批量提问（一次多问，最高效省成本）
+
+特点：返回完整概率分布 + confidence；强制调用方拥有选项集（防止模型自造答案）；实现 confidence 门控，动作取值 `act` / `review` / `abstain`，判定取值 `yes` / `no` / `uncertain`。
