@@ -32,3 +32,19 @@ agent 改这里的文件 → commit 到 main
 这也意味着 workflow 里能拿到 `CLOUDFLARE_API_TOKEN` / `EDGEONE_API_TOKEN` 两个
 Actions secret。这是**有意接受**的取舍（部署凭证不放在 agent 手里，但 agent
 能通过改 workflow 间接用到它们）。
+
+## 部署结果去哪看
+
+workflow 跑完会把结果写回 **`.deploy-status.json`**（就在这个目录）：
+
+```json
+{ "project": "...", "sha": "...", "at": "...", "runUrl": "...",
+  "test": "success", "cloudflare": "success", "edgeone": "success" }
+```
+
+所以 **agent 用 `ws_read` 就能看到上次部署成没成、跑的是哪个 commit** ——
+不需要别的凭证。⚠️ 刚提交完那一刻它还是**上一次**的结果，核对时比一下里面的
+`sha` 和你刚拿到的 commit。
+
+这个 commit 由 workflow 用默认的 `GITHUB_TOKEN` 推，**不会触发新的 workflow**，
+所以没有「部署完写状态 → 又触发部署」的循环。
