@@ -1,9 +1,11 @@
-# Cloudflare Pages 配置。
-# ⚠️ name 必须和目录名一致 —— workflow 用它当 Pages 项目名。
-# 部署命令是 `wrangler pages deploy public --project-name agent-sandbox`，
-# 静态站点不需要 build，所以这里只放最小配置。
+# Cloudflare **Workers + 静态资源**（不是老版 Pages —— wrangler 4 起 Pages 已并入
+# Workers，`pages project create` 会走去重路径然后报缺 entry-point）。
+# 好处：不用先建项目，`wrangler deploy` 首次自己创建。
+#
+# ⚠️ name 要和目录名一致 —— workflow 用它当部署名。
 name = "agent-sandbox"
 compatibility_date = "2026-09-01"
 
-# 这个项目不需要 Worker 运行时；要加边缘函数时再改这里
-pages_build_output_dir = "public"
+# 纯静态站点：没有 main 入口，只有 assets
+[assets]
+directory = "./public"

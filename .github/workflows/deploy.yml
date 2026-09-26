@@ -1,4 +1,4 @@
-# 把 projects/<名字>/ 部署到 Cloudflare Pages + EdgeOne Pages。
+# 把 projects/<名字>/ 部署到 Cloudflare（Workers+静态资源）+ EdgeOne Pages。
 #
 # ⚠️ 这个文件**agent 自己可以改** —— 它有这个仓库的 Contents 写权限。
 #    想换部署方式、加测试步骤、加新的部署目标，直接改这里就行。
@@ -96,7 +96,10 @@ jobs:
             echo "package.json 没有 test 脚本，跳过"
           fi
 
-      - name: 部署到 Cloudflare Pages
+      # ⚠️ 用的是 **Workers + 静态资源**，不是老版 Pages。
+      # wrangler 4 起 Pages 已并入 Workers，`pages project create` 会走去重路径然后
+      # 报「Missing entry-point」。Workers 这边首次 deploy 会自动建，少一个前置步骤。
+      - name: 部署到 Cloudflare
         working-directory: ${{ env.DIR }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -107,11 +110,9 @@ jobs:
             echo "⚠️ 没配 CLOUDFLARE_API_TOKEN，跳过 Cloudflare 这一路"
             exit 0
           fi
-          out=$(npx --yes wrangler@4 pages deploy public \
-            --project-name "${{ matrix.project }}" --branch main 2>&1) || {
-            echo "$out"; exit 1; }
+          out=$(npx --yes wrangler@4 deploy 2>&1) || { echo "$out"; exit 1; }
           echo "$out"
-          echo "$out" | grep -oE 'https://[a-zA-Z0-9._-]+\.pages\.dev' | head -1
+          echo "$out" | grep -oE 'https://[a-zA-Z0-9._-]+\.workers\.dev' | head -1
 
       - name: 部署到 EdgeOne Pages
         working-directory: ${{ env.DIR }}
@@ -123,5 +124,10 @@ jobs:
             echo "⚠️ 没配 EDGEONE_API_TOKEN，跳过 EdgeOne 这一路"
             exit 0
           fi
-          npx --yes edgeone makers deploy . \
-            -n "${{ matrix.project }}" -t "$EDGEONE_API_TOKEN" -a overseas --json
+          # 首次部署会自动建项目（实测：会打印 "doesn't exist. Creating new project."），
+          # 所以不需要预先在控制台建任何东西
+          out=$(npx --yes edgeone makers deploy . \
+            -n "${{ matrix.project }}" -t "$EDGEONE_API_TOKEN" -a overseas --json 2>&1) || {
+            echo "$out"; exit 1; }
+          echo "$out"
+          echo "$out" | tail -1 | jq -r '.url // empty' | sed 's/^/EdgeOne URL: /'
