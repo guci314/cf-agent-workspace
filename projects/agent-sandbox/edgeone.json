@@ -1,0 +1,4 @@
+{
+  "_comment": "EdgeOne Pages 配置。静态站点，发布 public/。",
+  "publicDir": "public"
+}

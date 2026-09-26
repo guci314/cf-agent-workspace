@@ -1,0 +1,127 @@
+# 把 projects/<名字>/ 部署到 Cloudflare Pages + EdgeOne Pages。
+#
+# ⚠️ 这个文件**agent 自己可以改** —— 它有这个仓库的 Contents 写权限。
+#    想换部署方式、加测试步骤、加新的部署目标，直接改这里就行。
+#
+# 设计：一个仓库多个项目。本次推送改了哪些 projects/* 就部署哪些，
+# 没改的不动 —— 免得碰一下 A 项目把 B 项目也重发一遍。
+name: Deploy projects
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      project:
+        description: "只部署这一个项目（留空 = 按本次推送自动检测）"
+        required: false
+
+# 同时只跑一个，后来的排队。两个部署同时打同一个项目会互相覆盖
+concurrency:
+  group: deploy-projects
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      projects: ${{ steps.pick.outputs.projects }}
+      any: ${{ steps.pick.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 要 diff 上一个 commit，浅克隆拿不到
+          fetch-depth: 0
+
+      - id: pick
+        env:
+          # ⚠️ 别把 ${{ }} 直接写进 run 的字符串里 —— 输入里带引号会把 shell 拆坏。
+          # 走 env 中转，shell 只看到变量的值
+          MANUAL: ${{ github.event.inputs.project }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -n "${MANUAL:-}" ]; then
+            list=$(jq -cn --arg p "$MANUAL" '[$p]')
+          else
+            # before 全是 0 = 新分支/首次推送，那种情况扫全量
+            if [ -z "${BEFORE:-}" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              names=$(git ls-tree -r --name-only HEAD -- projects | cut -d/ -f2 | sort -u)
+            else
+              names=$(git diff --name-only "$BEFORE" "${{ github.sha }}" -- projects | cut -d/ -f2 | sort -u)
+            fi
+            list=$(printf '%s\n' "$names" | grep -v '^$' | jq -R . | jq -cs .)
+          fi
+          echo "projects=$list" >> "$GITHUB_OUTPUT"
+          n=$(printf '%s' "$list" | jq 'length')
+          echo "any=$([ "$n" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "本次要部署：$list"
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      # 一个项目挂了不拖累别的
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.detect.outputs.projects) }}
+    env:
+      # 两个项目的目录名 = 平台上的项目名，三处必须一致（含 wrangler.toml 的 name）
+      DIR: projects/${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 装依赖
+        working-directory: ${{ env.DIR }}
+        run: |
+          set -euo pipefail
+          if [ ! -f package.json ]; then echo "没有 package.json，跳过"; exit 0; fi
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      # ⚠️ 部署门禁：测试挂了就**不部署**。这是这个闭环唯一的正确性保障 ——
+      # agent 往 test/ 里加真测试，这里就是它的刹车
+      - name: 跑测试
+        working-directory: ${{ env.DIR }}
+        run: |
+          set -euo pipefail
+          if [ ! -f package.json ]; then echo "没有 package.json，跳过"; exit 0; fi
+          if node -e "process.exit(require('./package.json').scripts?.test ? 0 : 1)"; then
+            npm test
+          else
+            echo "package.json 没有 test 脚本，跳过"
+          fi
+
+      - name: 部署到 Cloudflare Pages
+        working-directory: ${{ env.DIR }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "⚠️ 没配 CLOUDFLARE_API_TOKEN，跳过 Cloudflare 这一路"
+            exit 0
+          fi
+          out=$(npx --yes wrangler@4 pages deploy public \
+            --project-name "${{ matrix.project }}" --branch main 2>&1) || {
+            echo "$out"; exit 1; }
+          echo "$out"
+          echo "$out" | grep -oE 'https://[a-zA-Z0-9._-]+\.pages\.dev' | head -1
+
+      - name: 部署到 EdgeOne Pages
+        working-directory: ${{ env.DIR }}
+        env:
+          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${EDGEONE_API_TOKEN:-}" ]; then
+            echo "⚠️ 没配 EDGEONE_API_TOKEN，跳过 EdgeOne 这一路"
+            exit 0
+          fi
+          npx --yes edgeone makers deploy . \
+            -n "${{ matrix.project }}" -t "$EDGEONE_API_TOKEN" -a overseas --json
