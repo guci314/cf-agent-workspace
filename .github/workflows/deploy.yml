@@ -66,6 +66,10 @@ jobs:
       fail-fast: false
       matrix:
         project: ${{ fromJSON(needs.detect.outputs.projects) }}
+    # 最后一步要把部署结果写回仓库（给 agent 读），需要写权限 —— 新版仓库的
+    # 默认 GITHUB_TOKEN 是只读的，不显式声明会 403
+    permissions:
+      contents: write
     env:
       # 两个项目的目录名 = 平台上的项目名，三处必须一致（含 wrangler.toml 的 name）
       DIR: projects/${{ matrix.project }}
@@ -85,7 +89,8 @@ jobs:
 
       # ⚠️ 部署门禁：测试挂了就**不部署**。这是这个闭环唯一的正确性保障 ——
       # agent 往 test/ 里加真测试，这里就是它的刹车
-      - name: 跑测试
+      - id: test
+        name: 跑测试
         working-directory: ${{ env.DIR }}
         run: |
           set -euo pipefail
@@ -99,7 +104,8 @@ jobs:
       # ⚠️ 用的是 **Workers + 静态资源**，不是老版 Pages。
       # wrangler 4 起 Pages 已并入 Workers，`pages project create` 会走去重路径然后
       # 报「Missing entry-point」。Workers 这边首次 deploy 会自动建，少一个前置步骤。
-      - name: 部署到 Cloudflare
+      - id: cf
+        name: 部署到 Cloudflare
         working-directory: ${{ env.DIR }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -114,7 +120,8 @@ jobs:
           echo "$out"
           echo "$out" | grep -oE 'https://[a-zA-Z0-9._-]+\.workers\.dev' | head -1
 
-      - name: 部署到 EdgeOne Pages
+      - id: edge
+        name: 部署到 EdgeOne Pages
         working-directory: ${{ env.DIR }}
         env:
           EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
@@ -131,3 +138,44 @@ jobs:
             echo "$out"; exit 1; }
           echo "$out"
           echo "$out" | tail -1 | jq -r '.url // empty' | sed 's/^/EdgeOne URL: /'
+
+      # ⚠️ 为什么要有这一步：**agent 看不到 Actions 的结果** —— 它提交完代码，
+      # 部署成没成、拿到的 URL 是什么，都不在它的上下文里。所以把结果写成仓库里
+      # 一个文件，它用 ws_read 就能读到。**不需要给它开 Actions 权限**。
+      #
+      # 用默认的 GITHUB_TOKEN 推这个 commit —— GitHub 规定它**不会触发新的
+      # workflow**，所以天然没有「部署完写状态 → 又触发部署」的循环。
+      - name: 记录部署结果（写回仓库，让 agent 看得到）
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          out="projects/${{ matrix.project }}/.deploy-status.json"
+          mkdir -p "projects/${{ matrix.project }}"
+          cat > "$out" <<JSON
+          {
+            "project": "${{ matrix.project }}",
+            "sha": "${{ github.sha }}",
+            "at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "runUrl": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "test": "${{ steps.test.outcome }}",
+            "cloudflare": "${{ steps.cf.outcome }}",
+            "edgeone": "${{ steps.edge.outcome }}"
+          }
+          JSON
+          cat "$out"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$out"
+          if git diff --cached --quiet; then echo "状态没变，不提交"; exit 0; fi
+          git commit -q -m "deploy-status: ${{ matrix.project }} @ ${{ github.sha }} [skip ci]"
+          # 矩阵里多个项目可能同时在推，冲突就 rebase 重试
+          for i in 1 2 3; do
+            if git push -q; then echo "状态已写回"; exit 0; fi
+            echo "第 $i 次推送失败，rebase 后重试"
+            git pull -q --rebase --autostash origin main || true
+            sleep 2
+          done
+          echo "⚠️ 状态没写回去（推送一直失败）—— 不影响部署本身"
