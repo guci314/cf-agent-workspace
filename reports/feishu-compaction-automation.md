@@ -5,7 +5,24 @@
 | 目标项目 | `guci314/edgeone-agent-lab` |
 | 读码基准 | HEAD `e7b59db`（2026-09-25） |
 | 报告日期 | 本次会话 |
-| 结论 | **可行，但有一个未验证前提必须先测**；`docs/01` 的既有判断需修正 |
+| 结论 | **可行**（原「未验证前提」已于 2026-09-26 解决：history 截到 100 条，阈值够得着）；`docs/01` 的既有判断需修正 |
+
+---
+
+> ⚠️ **2026-09-26 订正（两处结论已被推翻，动手前先看这里）**
+>
+> **1. 3.2 的字符判据不是死代码。** 实测 `renderTranscript`（输入每条 4000 字）：
+> 28 条 → 112,138 字（false）；**30 条 → 120,031 字（true）**。截断后输出是
+> `120_000 + 省略提示约 31 字`，**刚好越线**，所以它恰好等价于「原始历史超 120k」，
+> 能用。**但正确性压在那 31 个字的提示文案上** —— 文案一改就静默失效。
+> 仍建议改用 `renderTranscript(items).includes("中间省略约")`。
+>
+> **2. 第四节的「前提 1」已经有答案，不必跑探针。** 平台实现
+> （`.edgeone/agent-node/server.mjs` 的 `createOpenAISession`）里 `MAX_LIMIT = 100`，
+> 且 SDK 取历史时**不传 limit** ⇒ **`history` 恒被截到最近 100 条**。100 条足以越过
+> 两个阈值，**方案成立**。
+> 副作用比前提本身更重要：**模型和 `/compact` 都只看得到最近 100 条**，
+> 100 条以前的对话平台早已静默丢弃 —— **压不回来**。
 
 ---
 
@@ -106,9 +123,13 @@ model = new OpenAIChatCompletionsModel(client, MODEL_NAME);   // MODEL_NAME = de
 建议判据（具体数字待定）：
 
 ```ts
-items.length > 60
-  || renderTranscript(items).length > MAX_TRANSCRIPT_CHARS   // 已有常量 120_000
+items.length > 60                                          // 兜底（条数被平台锁在 100）
+  || renderTranscript(items).includes("中间省略约")          // 主力：出现省略 ⇔ 原始超 120k
 ```
+
+> ⚠️ 初版这里写的是 `renderTranscript(items).length > MAX_TRANSCRIPT_CHARS`。
+> 它**碰巧也能用**（见文首订正 1），但正确性靠省略提示那 31 个字的长度撑着，
+> **文案一改就静默失效**。所以换成上面的 `.includes(...)`。
 
 ### 3.3 改动清单
 
@@ -125,21 +146,24 @@ items.length > 60
 
 ---
 
-## 四、⚠️ 未验证前提（**方案成立的地基**）
+## 四、前提状态（前提 1 ✅ 已解决；剩前提 2 未实测）
 
-> **必须先验证，否则整套方案可能是死代码。**
-> 这一节是本报告最该被认真对待的部分 —— 出处在下。
+> **2026-09-26**：前提 1 已从平台运行时源码里得到答案（见下），**不必再跑探针**。
+> 「整套方案可能是死代码」这个担心已排除。仍待实测的只有前提 2（后台执行那一跳）。
 
-### 前提 1：`sessionInputCallback` 给的 `history` 有多少条？
+### 前提 1 ✅ 已解决（2026-09-26）：`history` 恒被截到 100 条
 
-`src/feishu/session-sanitize.ts` 文件头写明：
+`src/feishu/session-sanitize.ts` 文件头说的「按窗口取」**是真的**。实现见
+`.edgeone/agent-node/server.mjs` 的 `createOpenAISession`：
+`const effectiveLimit = Math.min(limit ?? maxItems, MAX_LIMIT)`，
+其中 `MAX_LIMIT = 100`、`maxItems = sessionOptions.maxItems ?? MAX_LIMIT`；
+而 SDK **不传 limit**（`@openai/agents-core/dist/runner/sessionPersistence.js:252`），
+项目调 `openaiSession(cid)` 也没传选项 ⇒ **恒为 100 条**。
 
-> 会话历史是**按窗口**取的（`getItems(limit)` 返回最近 N 条）。
+**所以「到不了阈值、成为死代码」这个担心不成立** —— 两个阈值在 100 条以内都够得着。
 
-**若平台对 `history` 做了窗口截断，`history.length` 可能永远到不了阈值 ——
-`shouldCompact` 恒为 false，自动化成为死代码。**
-
-**这是必须先回答的问题，不解决整个方案不成立。**
+**但代价是**：100 条以前的对话平台早已静默丢弃，`/compact` 也压不回来。
+自动压缩要解决的是「100 条里体积过大」，不是「条数太多」。
 
 ### 前提 2：后台执行能否跑到压缩那一步？
 
@@ -158,7 +182,9 @@ items.length > 60
 1. **先加 `?probe=history` 诊断端点** —— 打印 `history.length` 和
    `renderTranscript(history).length`。**不写任何业务代码。**
    （与仓库既有 `?probe=1` / `?probe=last` / `?probe=model` 做法一致）
-2. 用它回答前提 1 / 3。**若 history 是截断的，方案作废，需另寻路径。**
+2. 用它回答前提 3（平台是否按 token 而非条数截断）。
+   **前提 1 已有答案**（history 被截到 100 条，但两个阈值都够得着）——
+   **方案不作废**，这一步降级为可选。
 3. 前提成立 → 写 `shouldCompact` 纯函数 + 单测
 4. 接标记与回合后处理，加计数器
 5. 按 `docs/03-验证清单.md` 的风格补验收条目

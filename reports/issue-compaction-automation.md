@@ -23,7 +23,8 @@
    可作为阈值判断的挂载点 —— **不必放弃平台原生 Session**
    （这修正了 `docs/01:603` 的既有判断）。
 2. 该回调**是同步的**，而摘要要调模型（异步），**不能在里面直接压缩**。
-   且压缩要求「读全量→清空→写回摘要」原子，在回调里清会让 `run()` 手中的历史消失。
+   且压缩要求「读全量（= 平台可见的最近 100 条，见第 0 步）→ 清空 → 写回摘要」原子，
+   在回调里清会让 `run()` 手中的历史消失。
 3. SDK 自带的 `OpenAIResponsesCompactionSession` 语义匹配，**但依赖 Responses API
    的 `responses.compact` 端点**；本项目走 `OpenAIChatCompletionsModel`
    （`_host.ts:320`，模型 `deepseek-v4.1-flash`，路由 OpenCode Go），**用不了**。
@@ -31,27 +32,43 @@
 
 ---
 
-## ⚠️ 第 0 步：先验证前提，不要写业务代码
+## ✅ 第 0 步（原为硬门槛）：答案已找到，方案成立 —— 但暴露了一件更重要的事
 
-**这一步没过，后面全部不要做。** 理由：若前提不成立，方案是死代码。
+> **2026-09-26 订正**：初版要求「先加探针验证 history 是否被截断，否则不许动手」。
+> **答案不必跑探针 —— 它写在平台运行时源码里。**
 
-`src/feishu/session-sanitize.ts` 文件头写明「会话历史是**按窗口**取的
-（`getItems(limit)` 返回最近 N 条）」。
+`src/feishu/session-sanitize.ts` 文件头说的「按窗口取」**是真的**。
+实现见 `.edgeone/agent-node/server.mjs` 的 `createOpenAISession`：
 
-**待验证前提**：`sessionInputCallback` 拿到的 `history` **是否被平台窗口截断**？
-- 若**截断** → `history.length` 可能永远到不了阈值 → `shouldCompact` 恒 false
-  → **整套方案作废**，回到本工单末尾的「备选路径」。
-- 若**全量** → 继续第 1 步。
+```js
+async getItems(limit) {
+  const effectiveLimit = Math.min(limit ?? maxItems, MAX_LIMIT);   // MAX_LIMIT = 100
+  const messages = await memory.getMessages({ conversationId: sessionId, limit: effectiveLimit, order: "desc" });
+  return messages.reverse().map(…).filter(…);
+}
+```
 
-**做法**：加一个诊断端点 `?probe=history`，输出：
-- `history.length`
-- `renderTranscript(history).length`（复用 `compact.ts` 已有的纯函数）
+`maxItems = sessionOptions.maxItems ?? MAX_LIMIT`（=100），而 SDK 取历史时**不传 limit**
+（`@openai/agents-core/dist/runner/sessionPersistence.js:252`：`const history = await session.getItems()`），
+本项目调 `openaiSession(cid)` 也没传选项 ⇒ **`history` 恒被截到最近 100 条**。
 
-放在 `agents/feishu/index.ts` 现有 `?probe=` 分支旁边
-（仓库已有 `?probe=1` / `?probe=last` / `?probe=model`，照它们的写法）。
+**方案不会变成死代码**：本工单设的两个阈值（60 条 / 12 万字）在 100 条以内**都够得着**
+（每条消息渲染上限 4000 字，约 30 条就顶到 120k）。**第 1 步可以照做。**
 
-**验收**：连续对话几十轮后调用该端点，确认 `history.length` 是否随轮次**持续增长**。
-把实测结果记录到本 issue 里，再决定是否继续。
+### ⚠️ 但由此暴露一件工单没提、且更需要处理的事
+
+**模型和 `/compact` 都只看得到最近 100 条。**
+
+- 100 条以前的对话，**平台早就静默丢弃了** —— 不报错、不留痕。
+- 所以**现有 `/compact` 也只压得到这 100 条**，更早的内容压不回来。
+  它的真实语义是「把最近 100 条压成摘要」，**不是**「把整段对话压成摘要」。
+- 推论：本工单开头那句「连续问几十轮就会撞上下文窗口」**方向说反了** ——
+  条数被平台锁死在 100；真正会撞的是「100 条里塞了大块工具输出」这种**单条很大**的情况。
+  **所以字符数那一支才是主力判据，条数只是兜底。**
+
+> **仍然可选做**：加 `?probe=history` 打一枪，确认线上的 `maxItems` 没被平台调过。
+> `.edgeone/` 是 CLI 从平台运行时模板生成的本地产物，与线上同源**理论上**成立，
+> 但这是唯一**未实测**的一环。
 
 ---
 
@@ -66,8 +83,14 @@ export function shouldCompact(items: readonly unknown[]): boolean
 ```
 
 判据（建议，可调）：
-- `items.length > 60`，或
-- `renderTranscript(items).length > MAX_TRANSCRIPT_CHARS`（常量已存在，`120_000`）
+- `items.length > 60`（兜底），或
+- `renderTranscript(items).includes("中间省略约")` —— **主力判据，推荐**。
+  出现省略提示 ⇔ 原始历史已超 120k，语义直白、零依赖。
+
+> ⚠️ **别**写成 `renderTranscript(items).length > MAX_TRANSCRIPT_CHARS`：
+> 它虽然**碰巧也能用**（截断后是 `120000 + 省略提示约 31 字`，刚好越线），
+> 但正确性建立在那 31 个字上 —— 省略文案一改就**静默失效**。实测数据见
+> `build-order.md` 开头那节。
 
 **为什么不用 token**：token 估算要引入 tokenizer，依赖变重且估不准；
 条数和字符数都能从 history **同步**算出、零依赖。且 `renderTranscript()` 已是纯函数，
@@ -120,7 +143,7 @@ sessionInputCallback: (history: any[], newItems: any[]) => {
 
 ## 验收标准
 
-- [ ] **第 0 步的实测结果已记录**（`history` 是否全量）
+- [ ] **第 0 步结论已确认**（history 被截到 100 条；两个阈值均够得着）
 - [ ] `npm run typecheck` 零错误
 - [ ] `npm test` 全绿
 - [ ] `shouldCompact` 有边界测试（空数组、刚好到阈值、超阈值）
@@ -146,12 +169,15 @@ sessionInputCallback: (history: any[], newItems: any[]) => {
 
 ---
 
-## 备选路径（仅当第 0 步证伪时使用）
+## 备选路径（已撤销 —— 第 0 步没有证伪）
 
-若 `history` 确实被窗口截断，则 `sessionInputCallback` 无法作为判据来源。
-此时按 `docs/01:603` 原本的建议走：在 `_host.ts` 的 `ask()` 里自己读历史 + 拼 `input`，
-不再交给 `session`。**代价是要自行实现会话读写，放弃平台原生 Session 的便利** ——
-这正是本工单希望避免的，所以请务必先做第 0 步。
+> **2026-09-26**：`history` 确实被截断（100 条），但 **100 条足以越过两个阈值**，
+> 所以 `sessionInputCallback` **可以**作为判据来源。原方案「放弃平台原生 Session、
+> 自己读历史拼 input」**不需要走**，保留在此仅作记录。
+
+若**将来**平台把 `maxItems` 调到阈值以下，此路重新可用：在 `_host.ts` 的 `ask()` 里
+自己读历史 + 拼 `input`，不再交给 `session`。**代价是要自行实现会话读写，
+放弃平台原生 Session 的便利** —— 这正是本工单希望避免的。
 
 ---
 

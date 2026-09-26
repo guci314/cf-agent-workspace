@@ -14,9 +14,10 @@
 
 ---
 
-## ⚠️ 先读这节：本轮核验发现的一处**方案错误**
+## ⚠️ 先读这节：判据「碰巧」是对的 —— 要改，但不是初版说的那个理由
 
-**工单①的阈值判据有个实打实的 bug，动手前必须先改。**
+> **2026-09-26 订正**：本文件初版断言工单①的字符判据「恒为 false，写进去就是死代码」。
+> **该断言错误，已实测推翻。** 判据其实**好使**，只是好使得很脆。
 
 原方案写：
 
@@ -45,46 +46,79 @@ function clampTranscript(s: string): string {
 }
 ```
 
-**所以返回值的长度永远 ≤ 120_000，「大于 120_000」不可能成立。**
-该判据永远为 false —— **写进去就是死代码。**
+**初版据此推断「返回长度永远 ≤ 120_000」—— 这里漏算了省略提示本身的长度。**
 
-**另一个连带事实**：`MAX_TRANSCRIPT_CHARS` 是 `const`（`:36`），
-**没有 `export`**。要用得先导出。
+跑真函数实测（输入为每条 4000 字的渲染结果）：
+
+| 条数 | 渲染长度 | `> 120_000` ? | 含省略标记 ? |
+|---|---|---|---|
+| 28 | 112,138 | false | false |
+| **30** | **120,031** | **true** | **true** |
+| 100 | 120,034 | true | true |
+
+截断后的输出是 `头 30,000 + 省略提示 + 尾 90,000`，而**省略提示本身约 31 字**，
+所以结果是 `120_000 + 31` —— **刚好越过线**。于是该判据恰好等价于
+「原始历史超过 120k」，**它是好使的**。
+
+⚠️ **但正确性全压在那 31 个字上**：谁把省略文案改短或删掉，判据就**静默失效**
+（恒返回 false）且不报错。**所以仍要改，只是理由不同** —— 不是「恒为 false」，
+而是「语法上依赖一句提示文案的长度」。
+
+**另一个连带事实**（这条初版说对了）：`MAX_TRANSCRIPT_CHARS` 是 `const`（`:36`），
+**没有 `export`**。走 A 方案不需要导出它。
 
 **修法（二选一）**：
 
-- **A（推荐）**：改用条数为主判据，字符数作辅助 —— 但要**自己算总长**，
-  别用 `renderTranscript` 的返回值。例如新增一个不截断的原始长度，
-  或先用 `renderTranscript` 判断「是否已被截断」：
-  `renderTranscript(items).includes("中间省略约")` ——
-  **一旦出现省略提示，说明原始历史已超 120k，正是该压缩的信号。**
-- **B**：干脆只用条数（`items.length > N`），简单但不如 A 灵敏。
+- **A（推荐）**：直接判「截断有没有发生过」——
+  `renderTranscript(items).includes("中间省略约")`。
+  出现省略提示 ⇔ 原始历史已超 120k，**语义直白，不依赖任何长度巧合**。
+- **B**：干脆只用条数（`items.length > N`），简单但对「条数少、单条很大」不灵敏。
 
-**A 的优点**：复用现有函数、零新增依赖，且「被截断」本身就是个准确的超限信号。
+**A 的优点**：复用现有函数、零新增依赖，且「被截断」本身就是个准确的超限信号 ——
+关键是不再靠那 31 个字的巧合。
 
 ---
 
-## 第 0 步（硬门槛）：验证 `history` 是否被窗口截断
+## 第 0 步（原为硬门槛）：答案已找到 —— history 截到 100 条，但方案仍成立
 
-**这一步没过，工单① 整个作废。不要写任何业务代码。**
+> **2026-09-26 订正**：初版把「history 会不会被窗口截断」列为**必须先跑探针才能动工的硬门槛**。
+> **不必跑探针 —— 答案写在平台运行时源码里。**
 
-**依据**：`src/feishu/session-sanitize.ts` 文件头明文：
+`src/feishu/session-sanitize.ts` 文件头说的「按窗口取」**是真的**。
+具体实现见 `.edgeone/agent-node/server.mjs` 的 `createOpenAISession`：
 
-> 会话历史是**按窗口**取的（`getItems(limit)` 返回最近 N 条）。
+```js
+async getItems(limit) {
+  const effectiveLimit = Math.min(limit ?? maxItems, MAX_LIMIT);   // MAX_LIMIT = 100
+  const messages = await memory.getMessages({ conversationId: sessionId, limit: effectiveLimit, order: "desc" });
+  return messages.reverse().map(…).filter(…);
+}
+```
 
-**风险**：若 `sessionInputCallback` 收到的 `history` 也被窗口截断，
-则 `history.length` 可能**永远到不了阈值** → `shouldCompact` 恒 false → 死代码。
+- `var MAX_LIMIT = 100;`
+- `const maxItems = sessionOptions.maxItems ?? MAX_LIMIT;` → 不传即 **100**
+- SDK 取历史时**不传 limit**（`@openai/agents-core/dist/runner/sessionPersistence.js`：
+  `const history = await session.getItems()`）
+- 项目调 `context.store.openaiSession(cid)`，**没传 sessionOptions** → `maxItems = 100`
 
-**做法**：加 `?probe=history` 诊断端点，输出：
+**结论：`sessionInputCallback` 收到的 `history` 被截到最近 100 条。**
 
-- `history.length`
-- `renderTranscript(history).length`（**注意**：这个值会卡在 120k 上限，别用它判超限）
-- 是否含「中间省略约」（**这个才是超限信号**，见上节）
+**但方案不会变成死代码**：`items.length > 60` 在 100 条以内够得着；
+字符判据约 30 条就顶到 120k 的渲染上限。**第 1 步可以照做。**
 
-放在 `agents/feishu/index.ts` 现有 `?probe=` 分支旁（已有 `?probe=1` / `last` / `model`）。
+**三个必须一并记住的后果**（初版完全没提到，比工单①本身更重要）：
 
-**验收**：连续对话几十轮后调用，看 `history.length` 是否**持续增长**。
-**把实测数字记录进 issue，再决定是否继续。**
+1. **模型看不到 100 条以前的对话** —— 平台静默丢弃，不报错、不留痕。
+   所以「会话无限增长、迟早撞窗口」是**错的方向**；真正会撞的是
+   「100 条里塞了大块工具输出」这种**单条很大**的情况。
+2. **现有 `/compact` 也只压得到这 100 条**（它同样走 `getItems()`）。
+   更早的内容压不回来 —— 已经不在 session 里了。所以 `/compact` 的语义是
+   「把最近 100 条压成摘要」，**不是**「把整段对话压成摘要」。
+3. 因此自动压缩要解决的，是「100 条里体积过大」，而不是「条数太多」。
+
+**仍然值得做（降级为可选）**：加 `?probe=history` 打一枪，确认线上的 `maxItems`
+没被平台调过。`.edgeone/` 是 CLI 从平台运行时模板生成的本地产物，理论上与线上同源，
+但这是唯一**未实测**的一环。放 `agents/feishu/index.ts` 现有 `?probe=` 分支旁即可。
 
 ---
 
@@ -92,11 +126,11 @@ function clampTranscript(s: string): string {
 
 ### 第 1 步：工单① 会话压缩自动化
 
-**前提**：第 0 步通过。
+**前提**：已具备（第 0 步的答案：history 截到 100 条，但两个阈值在 100 以内都够得着 —— 方案成立）。
 
 | 任务 | 文件 | 依据 |
 |---|---|---|
-| 1.1 导出 `MAX_TRANSCRIPT_CHARS` 或按 A 方案改判据 | `src/feishu/compact.ts:36` | 见上节修正 |
+| 1.1 判据改用 A 方案（`.includes("中间省略约")`），不必再比长度 | `src/feishu/compact.ts:82-88` | 见上节修正 |
 | 1.2 新增纯函数 `shouldCompact` | `src/feishu/compact.ts` | 文件头约定：纯函数放这，胶水留 `_host.ts` |
 | 1.3 回调内**只做同步判断**、置标记 | `agents/feishu/_host.ts:516` | 回调是同步的，不能 await |
 | 1.4 回合后执行压缩，**复用现有三步** | `agents/feishu/_host.ts:642-667` | `compact()` 已实现，别重写 |
@@ -186,9 +220,9 @@ function clampTranscript(s: string): string {
 ## 总体依赖关系
 
 ```
-第 0 步（验证 history 是否截断）
-   │  ├─ 通过 → 第 1 步
-   │  └─ 证伪 → 工单①作废，改走 docs/01:603 的备选路径
+第 0 步（history 窗口）—— ✅ 已有答案：截到 100 条，两个阈值都够得着
+   │  └─ 工单① 成立，直接进第 1 步
+   │     （原「证伪则作废、改走备选路径」的分支已撤销）
    │
 第 2 步 ── 独立，可并行
    │
@@ -218,7 +252,9 @@ function clampTranscript(s: string): string {
 
 - 三份工单见文首表格
 - `.github/workflows/deploy.yml`（部署链路，**第 3 步的核心依据**）
-- `src/feishu/compact.ts:36`（`MAX_TRANSCRIPT_CHARS`）、`:82-88`、`:177-185`（**本轮修正依据**）
-- `src/feishu/session-sanitize.ts` 文件头（第 0 步的前提来源）
+- `src/feishu/compact.ts:36`（`MAX_TRANSCRIPT_CHARS`）、`:82-88`、`:177-185`（判据实测依据）
+- `src/feishu/session-sanitize.ts` 文件头（history 窗口那条线索的来源）
+- **`.edgeone/agent-node/server.mjs` 的 `createOpenAISession`（`MAX_LIMIT = 100`）** —— 第 0 步答案的出处
+- `@openai/agents-core/dist/runner/sessionPersistence.js:252`（`getItems()` 不传 limit）
 - `agents/feishu/_host.ts:516`（回调）、`:642-667`（`compact()`）
 - 架构笔记：`cf-agent-workspace/notes/edgeone-agent-lab-架构.md`
